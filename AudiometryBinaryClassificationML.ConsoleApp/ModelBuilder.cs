@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Microsoft.ML;
@@ -10,29 +9,33 @@ namespace AudiometryBinaryClassificationML.ConsoleApp
 {
     public static class ModelBuilder
     {
+        /**********************************************/
+        /*                 ATTRIBUTES                 */
+        /**********************************************/
+
         /* FILE PATHS */
-        //private static string APP_PATH => Path.GetDirectoryName(Environment.GetCommandLineArgs()[0]);
+
         private static string APP_PATH => Environment.CurrentDirectory;
+        /// <summary> Dataset where the trained model is saved. </summary>
+        private static readonly string TEST_DATA_FILEPATH = Path.Combine(APP_PATH, "..", "..", "..", "Data", "AudiometryTest.csv");
         /// <summary> Dataset used to train the model. </summary>
-        /*private static string _trainDataPath => Path.Combine(APP_PATH, "..", "..", "..", "Data", "AudiometryTrain.csv");
-        /// <summary> Dataset used to evaluate the model. </summary>
-        private static string _testDataPath => Path.Combine(APP_PATH, "..", "..", "..", "Data", "AudiometryTest.csv");
+        private static readonly string TRAIN_DATA_FILEPATH = Path.Combine(APP_PATH, "..", "..", "..", "Data", "AudiometryTrain.csv");
         /// <summary> Dataset where the trained model is saved. </summary>
-        private static string _modelPath => Path.Combine(APP_PATH, "..", "..", "..", "Models", "model.zip");*/
-        /// <summary> Dataset where the trained model is saved. </summary>
-        private static string TEST_DATA_FILEPATH = Path.Combine(APP_PATH, "..", "..", "..", "Data", "AudiometryTrain.csv");
-        /// <summary> Dataset used to train the model. </summary>
-        private static string TRAIN_DATA_FILEPATH = Path.Combine(APP_PATH, "..", "..", "..", "Data", "AudiometryTest.csv");
-        /// <summary> Dataset where the trained model is saved. </summary>
-        private static string MODEL_FILE = ConsumeModel.MLNetModelPath;
+        private static readonly string MODEL_FILE = ConsumeModel.MODEL_PATH;
 
 
-        /// <summary> Provides processing context. </summary>
+        /* MODEL ATTRIBUTES */
+
         private static MLContext mlContext;
-
+        private static IDataView TrainingDataView;
         private static ITransformer TrainedModel;
+        private static IEstimator<ITransformer> TrainingPipeline;
 
 
+
+        /**********************************************/
+        /*                  METHODS                   */
+        /**********************************************/
 
         /// <summary>
         /// Driver for the model creation.
@@ -44,28 +47,30 @@ namespace AudiometryBinaryClassificationML.ConsoleApp
             Console.WriteLine("Initialized MLContext.");
 
             // Load data.
-            IDataView trainingDataView = mlContext.Data.LoadFromTextFile<ModelInput>(
-                                            path: TRAIN_DATA_FILEPATH,
-                                            hasHeader: true,
-                                            separatorChar: ',',
-                                            allowQuoting: true,
-                                            allowSparse: false);
+            TrainingDataView = mlContext.Data.LoadFromTextFile<HearingSetInput>(
+                                  path: TRAIN_DATA_FILEPATH,
+                                  hasHeader: true,
+                                  separatorChar: ',',
+                                  allowQuoting: true,
+                                  allowSparse: false
+                               );
             Console.WriteLine("Loaded the training data.");
 
             // Build training pipeline.
-            IEstimator<ITransformer> trainingPipeline = BuildTrainingPipeline(mlContext);
+            TrainingPipeline = BuildTrainingPipeline();
             Console.WriteLine("Processed the data.");
 
             // Train model.
-            //ITransformer mlModel = TrainModel(mlContext, trainingDataView, trainingPipeline);
-            TrainedModel = TrainModel(mlContext, trainingDataView, trainingPipeline);
-            Console.WriteLine("Trained the model.");
+            Console.WriteLine("Training the model...");
+            TrainedModel = TrainModel();
 
             // Evaluate model.
-            Evaluate(mlContext, trainingDataView, trainingPipeline);
+            Console.WriteLine("Evaluating the model...");
+            Evaluate();
 
             // Save model.
-            SaveModel(mlContext, TrainedModel, MODEL_FILE, trainingDataView.Schema);
+            SaveModel(TrainingDataView.Schema);
+            Console.WriteLine("Saved the model.");
         }
 
 
@@ -73,17 +78,23 @@ namespace AudiometryBinaryClassificationML.ConsoleApp
         /// Extracts and transforms the data.
         /// </summary>
         /// <returns> trainingPipeline </returns>
-        public static IEstimator<ITransformer> BuildTrainingPipeline(MLContext mlContext)
+        public static IEstimator<ITransformer> BuildTrainingPipeline()
         {
             // Extract features and transform the data.
             var dataProcessPipeline = mlContext.Transforms.Conversion.MapValueToKey("col0", "col0")
                                       .Append(mlContext.Transforms.Categorical.OneHotEncoding(new[] {
-                                          new InputOutputColumnPair("col1", "col1"), new InputOutputColumnPair("col2", "col2"),
-                                          new InputOutputColumnPair("col3", "col3"), new InputOutputColumnPair("col4", "col4"),
-                                          new InputOutputColumnPair("col5", "col5"), new InputOutputColumnPair("col6", "col6"),
-                                          new InputOutputColumnPair("col7", "col7"), new InputOutputColumnPair("col8", "col8"),
-                                          new InputOutputColumnPair("col9", "col9"), new InputOutputColumnPair("col10", "col10"),
-                                          new InputOutputColumnPair("col11", "col11"), new InputOutputColumnPair("col12", "col12"),
+                                          new InputOutputColumnPair("col1", "col1"),
+                                          new InputOutputColumnPair("col2", "col2"),
+                                          new InputOutputColumnPair("col3", "col3"),
+                                          new InputOutputColumnPair("col4", "col4"),
+                                          new InputOutputColumnPair("col5", "col5"),
+                                          new InputOutputColumnPair("col6", "col6"),
+                                          new InputOutputColumnPair("col7", "col7"),
+                                          new InputOutputColumnPair("col8", "col8"),
+                                          new InputOutputColumnPair("col9", "col9"),
+                                          new InputOutputColumnPair("col10", "col10"),
+                                          new InputOutputColumnPair("col11", "col11"),
+                                          new InputOutputColumnPair("col12", "col12"),
                                           new InputOutputColumnPair("col13", "col13") }
                                       ))
                                       .Append(mlContext.Transforms.Text.FeaturizeText("col14_tf", "col14"))
@@ -98,8 +109,13 @@ namespace AudiometryBinaryClassificationML.ConsoleApp
                                       .Append(mlContext.Transforms.Text.FeaturizeText("col23_tf", "col23"))
                                       .Append(mlContext.Transforms.Text.FeaturizeText("col24_tf", "col24"))
                                       .Append(mlContext.Transforms.Text.FeaturizeText("col25_tf", "col25"))
-                                      .Append(mlContext.Transforms.Concatenate("Features", new[] { "col1", "col2", "col3", "col4", "col5", "col6", "col7", "col8", "col9", "col10", "col11", "col12", "col13", "col14_tf", "col15_tf", "col16_tf", "col17_tf", "col18_tf", "col19_tf", "col20_tf", "col21_tf", "col22_tf", "col23_tf", "col24_tf", "col25_tf" }));
-            
+                                      .Append(mlContext.Transforms.Concatenate("Features", new[] {
+                                          "col1", "col2", "col3", "col4", "col5", "col6", "col7", "col8",
+                                          "col9", "col10", "col11", "col12", "col13", "col14_tf", "col15_tf",
+                                          "col16_tf", "col17_tf", "col18_tf", "col19_tf", "col20_tf",
+                                          "col21_tf", "col22_tf", "col23_tf", "col24_tf", "col25_tf" }
+                                      ));
+
             // Set the training algorithm.
             var trainer = mlContext.MulticlassClassification.Trainers.LightGbm(labelColumnName: @"col0", featureColumnName: "Features")
                                       .Append(mlContext.Transforms.Conversion.MapKeyToValue("PredictedLabel", "PredictedLabel"));
@@ -114,46 +130,53 @@ namespace AudiometryBinaryClassificationML.ConsoleApp
         /// Fits the training data to the training pipeline.
         /// </summary>
         /// <returns> model </returns>
-        public static ITransformer TrainModel(MLContext mlContext, IDataView trainingDataView, IEstimator<ITransformer> trainingPipeline)
+        public static ITransformer TrainModel()
         {
-             ITransformer model = trainingPipeline.Fit(trainingDataView);
+            ITransformer model = TrainingPipeline.Fit(TrainingDataView);
             return model;
-        } 
+        }
 
 
         /// <summary>
-        /// Cross-Validates a single dataset (since we don't have two datasets, one for training and for evaluate)
-            // in order to evaluate and get the model's accuracy metrics
+        /// Evaluates the model using the test dataset.
+        /// </summary>
+        private static void Evaluate()
+        {
+            // Load data.
+            IDataView testDataView = mlContext.Data.LoadFromTextFile<HearingSetInput>(
+                                        path: TEST_DATA_FILEPATH,
+                                        hasHeader: true,
+                                        separatorChar: ',',
+                                        allowQuoting: true,
+                                        allowSparse: false
+                                     );
+
+
+            // Evaluate the model's quality metrics.
+            var testMetrics = mlContext.MulticlassClassification.Evaluate(TrainedModel.Transform(testDataView), labelColumnName: @"col0");
+            PrintMulticlassClassificationMetrics(testMetrics);
+        }
+
+
+        /// <summary>
+        /// Saves the trained model to a .ZIP file.
         /// </summary>
         /// <returns> model </returns>
-        private static void Evaluate(MLContext mlContext, IDataView trainingDataView, IEstimator<ITransformer> trainingPipeline)
+        private static void SaveModel(DataViewSchema modelInputSchema)
         {
-            var testDataView = mlContext.Data.LoadFromTextFile<ModelInput>(TEST_DATA_FILEPATH, hasHeader: true);
-
-            // Gets the quality metrics for the model.
-            //var testMetrics = mlContext.MulticlassClassification.Evaluate(TrainedModel.Transform(testDataView));
-
-            // Cross-Validate with single dataset (since we don't have two datasets, one for training and for evaluate)
-            // in order to evaluate and get the model's accuracy metrics
-            Console.WriteLine("=============== Cross-validating to get model's accuracy metrics ===============");
-            var crossValidationResults = mlContext.MulticlassClassification.CrossValidate(trainingDataView, trainingPipeline, numberOfFolds: 5, labelColumnName: "col0");
-            PrintMulticlassClassificationFoldsAverageMetrics(crossValidationResults);
+            mlContext.Model.Save(TrainedModel, modelInputSchema, GetAbsolutePath(MODEL_FILE));
         }
 
 
-        private static void SaveModel(MLContext mlContext, ITransformer mlModel, string modelRelativePath, DataViewSchema modelInputSchema)
-        {
-            // Save/persist the trained model to a .ZIP file
-            Console.WriteLine($"=============== Saving the model  ===============");
-            mlContext.Model.Save(mlModel, modelInputSchema, GetAbsolutePath(modelRelativePath));
-            Console.WriteLine("The model is saved to {0}", GetAbsolutePath(modelRelativePath));
-        }
-
-
+        /// <summary>
+        /// Uses Path to get the absolute path of a file.
+        /// </summary>
+        /// <param name="relativePath"></param>
+        /// <returns> fullPath </returns>
         public static string GetAbsolutePath(string relativePath)
         {
-            FileInfo _dataRoot = new FileInfo(typeof(Program).Assembly.Location);
-            string assemblyFolderPath = _dataRoot.Directory.FullName;
+            FileInfo dataRoot = new FileInfo(typeof(Program).Assembly.Location);
+            string assemblyFolderPath = dataRoot.Directory.FullName;
 
             string fullPath = Path.Combine(assemblyFolderPath, relativePath);
 
@@ -161,93 +184,32 @@ namespace AudiometryBinaryClassificationML.ConsoleApp
         }
 
 
+        /// <summary>
+        /// Prints the micro- and macro-accuracy, log-loss,
+        /// and log-loss reduction of the model evaluation.
+        /// </summary>
+        /// <param name="metrics"></param>
         public static void PrintMulticlassClassificationMetrics(MulticlassClassificationMetrics metrics)
         {
             /*
              * Metrics for Multi-Class Classification:
              * 
-             * Micro Accuracy      -  Better if close to 1
-             * Macro Accuracy      -  Better if close to 1
-             * Log-loss            -  Better if close to 0
-             * Log-loss Reduction  -  Better if close to 1
+             * Micro Accuracy      :  Better if close to 1
+             * Macro Accuracy      :  Better if close to 1
+             * Log-loss            :  Better if close to 0
+             * Log-loss Reduction  :  Better if close to 1
              */
 
             // Display the metrics for model validation.
-            Console.WriteLine($"************************************************************");
+            Console.WriteLine($"\n*****************************************************");
             Console.WriteLine($"*    Metrics for Multi-Class Classification Model   ");
-            Console.WriteLine($"*-----------------------------------------------------------");
-            Console.WriteLine($"    MacroAccuracy = {metrics.MacroAccuracy:0.####}");
-            Console.WriteLine($"    MicroAccuracy = {metrics.MicroAccuracy:0.####}");
-            Console.WriteLine($"    LogLoss = {metrics.LogLoss:0.####}");
-
-            for (int i = 0; i < metrics.PerClassLogLoss.Count; i++)
-            {
-                Console.WriteLine($"    LogLoss for class {i + 1} = {metrics.PerClassLogLoss[i]:0.####}");
-            }
-
-            Console.WriteLine($"************************************************************");
+            Console.WriteLine($"*----------------------------------------------------");
+            Console.WriteLine($"*   Macro Accuracy     = {metrics.MacroAccuracy:0.####}");
+            Console.WriteLine($"*   Micro Accuracy     = {metrics.MicroAccuracy:0.####}");
+            Console.WriteLine($"*   Log-Loss           = {metrics.LogLoss:0.####}");
+            Console.WriteLine($"*   Log-Loss Reduction = {metrics.LogLossReduction:0.####}");
+            Console.WriteLine($"*****************************************************\n");
         }
 
-
-        public static void PrintMulticlassClassificationFoldsAverageMetrics(IEnumerable<TrainCatalogBase.CrossValidationResult<MulticlassClassificationMetrics>> crossValResults)
-        {
-            var metricsInMultipleFolds = crossValResults.Select(r => r.Metrics);
-
-            var microAccuracyValues = metricsInMultipleFolds.Select(m => m.MicroAccuracy);
-            var microAccuracyAverage = microAccuracyValues.Average();
-            var microAccuraciesStdDeviation = CalculateStandardDeviation(microAccuracyValues);
-            var microAccuraciesConfidenceInterval95 = CalculateConfidenceInterval95(microAccuracyValues);
-
-            var macroAccuracyValues = metricsInMultipleFolds.Select(m => m.MacroAccuracy);
-            var macroAccuracyAverage = macroAccuracyValues.Average();
-            var macroAccuraciesStdDeviation = CalculateStandardDeviation(macroAccuracyValues);
-            var macroAccuraciesConfidenceInterval95 = CalculateConfidenceInterval95(macroAccuracyValues);
-
-            var logLossValues = metricsInMultipleFolds.Select(m => m.LogLoss);
-            var logLossAverage = logLossValues.Average();
-            var logLossStdDeviation = CalculateStandardDeviation(logLossValues);
-            var logLossConfidenceInterval95 = CalculateConfidenceInterval95(logLossValues);
-
-            var logLossReductionValues = metricsInMultipleFolds.Select(m => m.LogLossReduction);
-            var logLossReductionAverage = logLossReductionValues.Average();
-            var logLossReductionStdDeviation = CalculateStandardDeviation(logLossReductionValues);
-            var logLossReductionConfidenceInterval95 = CalculateConfidenceInterval95(logLossReductionValues);
-
-            Console.WriteLine($"*************************************************************************************************************");
-            Console.WriteLine($"*       Metrics for Multi-class Classification model      ");
-            Console.WriteLine($"*------------------------------------------------------------------------------------------------------------");
-            Console.WriteLine($"*       Average MicroAccuracy:    {microAccuracyAverage:0.###}  - Standard deviation: ({microAccuraciesStdDeviation:#.###})  - Confidence Interval 95%: ({microAccuraciesConfidenceInterval95:#.###})");
-            Console.WriteLine($"*       Average MacroAccuracy:    {macroAccuracyAverage:0.###}  - Standard deviation: ({macroAccuraciesStdDeviation:#.###})  - Confidence Interval 95%: ({macroAccuraciesConfidenceInterval95:#.###})");
-            Console.WriteLine($"*       Average LogLoss:          {logLossAverage:#.###}  - Standard deviation: ({logLossStdDeviation:#.###})  - Confidence Interval 95%: ({logLossConfidenceInterval95:#.###})");
-            Console.WriteLine($"*       Average LogLossReduction: {logLossReductionAverage:#.###}  - Standard deviation: ({logLossReductionStdDeviation:#.###})  - Confidence Interval 95%: ({logLossReductionConfidenceInterval95:#.###})");
-            Console.WriteLine($"*************************************************************************************************************");
-
-        }
-
-
-        /// <summary>
-        /// Calculates the standard deviation.
-        /// </summary>
-        /// <param name="values"></param>
-        /// <returns>The standard deviation.</returns>
-        public static double CalculateStandardDeviation(IEnumerable<double> values)
-        {
-            double average = values.Average();
-            double sumOfSquaresOfDifferences = values.Select(val => (val - average) * (val - average)).Sum();
-
-            // Calculate the standard deviation.
-            return Math.Sqrt(sumOfSquaresOfDifferences / (values.Count() - 1));
-        }
-
-
-        /// <summary>
-        /// Calculates the confidence interval of 95.
-        /// </summary>
-        /// <param name="values"></param>
-        /// <returns>The confidence interval.</returns>
-        public static double CalculateConfidenceInterval95(IEnumerable<double> values)
-        {
-            return 1.96 * CalculateStandardDeviation(values) / Math.Sqrt((values.Count() - 1));
-        }
     }
 }
